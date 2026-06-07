@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>グリーンシミュレーター V7 (距離表示＆タップバグ修正)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0; padding: 0; background: #121212; color: #fff;
+            display: flex; flex-direction: column; align-items: center;
+            height: 100vh; overflow: hidden;
+        }
+        .header {
+            width: 100%; padding: 12px 0; text-align: center;
+            background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10;
+        }
+        .status-bar {
+            padding: 6px; font-size: 0.8rem; color: #aaa; text-align: center; z-index: 10;
+        }
+        #canvas-container {
+            width: 100vw; flex-grow: 1; position: relative; overflow: hidden;
+            background: #1a1a1a; touch-action: none;
+        }
+        svg { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        
+        /* 【重要】背景画像がタップイベントを邪魔しないように設定 */
+        image { pointer-events: none; user-select: none; -webkit-user-drag: none; }
+        
+        /* 通過マス（写真の文字が見えるように半透明の黄色にする） */
+        .highlight-cell { fill: rgba(255, 235, 59, 0.25); stroke: #ffeb3b; stroke-width: 0.4; }
+        
+        /* 下部コントロールパネル */
+        .controls {
+            width: 100%; max-width: 400px; padding: 15px; box-sizing: border-box;
+            background: rgba(30, 30, 30, 0.95); border-radius: 12px 12px 0 0; z-index: 10;
+            box-shadow: 0 -4px 10px rgba(0,0,0,0.5);
+        }
+        .setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 0.85rem; }
+        select { background: #333; color: white; border: 1px solid #555; padding: 4px 8px; border-radius: 4px; }
+        
+        /* 距離表示用のスタイル */
+        .distance-display {
+            font-size: 0.9rem; color: #a1c181; text-align: center; margin-bottom: 4px; font-weight: bold;
+        }
+        .result-text { font-size: 1.15rem; font-weight: bold; color: #ffeb3b; text-align: center; margin: 8px 0; min-height: 28px; white-space: pre-line; line-height: 1.4; }
+        .btn-reset { width: 100%; padding: 10px; background: #c62828; color: white; border: none; border-radius: 6px; font-size: 0.9rem; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="header">GOLF PUTT NAVI V7 (Distance)</div>
+<div class="status-bar" id="statusBar">【2本指で拡大移動】/【タップしてBとPを配置】</div>
+
+<div id="canvas-container">
+    <svg id="greenSvg">
+        <g id="viewport">
+            <image href="green_map.jpg" x="0" y="0" width="400" height="400" />
+
+            <g id="highlightGroup"></g>
+            
+            <line id="traceLine" stroke="#fff" stroke-width="2.5" stroke-dasharray="4,4" style="display:none;"/>
+            
+            <circle id="ballMarker" r="8" fill="#2196f3" stroke="white" stroke-width="2.5" style="display:none;"/>
+            <circle id="pinMarker" r="8" fill="#f44336" stroke="white" stroke-width="2.5" style="display:none;"/>
+        </g>
+    </svg>
+</div>
+
+<div class="controls">
+    <div class="setting-row">
+        <label for="stimp">グリーンの速さ:</label>
+        <select id="stimp">
+            <option value="8.5">8.5 ft (一般)</option>
+            <option value="10.0" selected>10.0 ft (やや速い)</option>
+            <option value="11.5">11.5 ft (トーナメント級)</option>
+        </select>
+    </div>
+    <div class="distance-display" id="distanceOut"></div>
+    <div class="result-text" id="uiResult">画面をタップしてスタート</div>
+    <button class="btn-reset" onclick="resetApp()">リセット</button>
+</div>
+
+<script>
+// --- 傾斜データマップ（空間補完用） ---
+const KNOWN_DATA = {
+    "15,35": { slope: 3.4, angle: 180 }, "15,28": { slope: 3.2, angle: 180 },
+    "15,25": { slope: 3.4, angle: 180 }, "15,20": { slope: 3.7, angle: 180 },
+    "15,13": { slope: 3.7, angle: 180 }, "15,5":  { slope: 1.8, angle: 180 }, 
+    "23,26": { slope: 2.2, angle: 225 }, "25,24": { slope: 2.3, angle: 225 },
+    "28,23": { slope: 2.1, angle: 225 }, "25,18": { slope: 1.6, angle: 180 },
+    "25,14": { slope: 1.9, angle: 180 }, "8,29":  { slope: 2.7, angle: 180 },
+    "8,22":  { slope: 3.2, angle: 180 },  "8,16":  { slope: 3.7, angle: 180 }
+};
+
+const greenSlopeMap = {};
+for (let x = 0; x <= 40; x++) {
+    for (let y = 0; y <= 40; y++) {
+        const currentKey = `${x},${y}`;
+        if (KNOWN_DATA[currentKey]) { greenSlopeMap[currentKey] = KNOWN_DATA[currentKey]; continue; }
+        let totalWeight = 0, weightedSlopeSum = 0, weightedAngleX = 0, weightedAngleY = 0;
+        for (const [knownKey, data] of Object.entries(KNOWN_DATA)) {
+            const [kx, ky] = knownKey.split(',').map(Number);
+            const distance = Math.hypot(x - kx, y - ky);
+            if (distance === 0) { weightedSlopeSum = data.slope; totalWeight = 1; break; }
+            const weight = 1 / Math.pow(distance, 2);
+            weightedSlopeSum += data.slope * weight;
+            const rad = data.angle * (Math.PI / 180);
+            weightedAngleX += Math.sin(rad) * weight; weightedAngleY += Math.cos(rad) * weight;
+            totalWeight += weight;
+        }
+        if (totalWeight > 0) {
+            const finalSlope = weightedSlopeSum / totalWeight;
+            const finalRad = Math.atan2(weightedAngleX / totalWeight, weightedAngleY / totalWeight);
+            let finalAngle = finalRad * (180 / Math.PI);
+            if (finalAngle < 0) finalAngle += 360;
+            greenSlopeMap[currentKey] = { slope: parseFloat(finalSlope.toFixed(1)), angle: Math.round(finalAngle) };
+        } else {
+            greenSlopeMap[currentKey] = { slope: 1.5, angle: 180 };
+        }
+    }
+}
+
+let ballPos = null, pinPos = null;
+let scale = 1.0, pointX = 0, pointY = 0, startX = 0, startY = 0, isPanning = false, startDist = 0;
+let moved = false; // スワイプ移動とタップを区別するフラグ
+
+const viewport = document.getElementById('viewport');
+const container = document.getElementById('canvas-container');
+
+// タッチイベントの調整（ドラッグ時の誤作動防止）
+container.addEventListener('pointerdown', function(e) {
+    moved = false;
+    const touches = e.targetTouches || [e];
+    if (e.pointerType === 'touch' && touches.length === 2) { 
+        isPanning = false; 
+        startDist = Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY); 
+    } else { 
+        isPanning = true; 
+        startX = e.clientX - pointX; 
+        startY = e.clientY - pointY; 
+    }
+});
+
+container.addEventListener('pointermove', function(e) { 
+    if (isPanning) { 
+        pointX = e.clientX - startX; 
+        pointY = e.clientY - startY; 
+        updateTransform(); 
+        moved = true; // 動いた場合はタップとみなさない
+    }
+});
+
+container.addEventListener('touchmove', function(e) {
+    if (e.touches.length === 2) {
+        isPanning = false; 
+        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        if (startDist > 0) { scale = Math.min(Math.max(scale * (dist / startDist), 0.5), 4.0); updateTransform(); }
+        startDist = dist;
+        moved = true;
+    }
+}, {passive: true});
+
+container.addEventListener('pointerup', function(e) { 
+    isPanning = false; 
+    startDist = 0; 
+    
+    // 【バグ修正】ドラッグ移動（画面スクロール）をしていなければ、指を離した瞬間にタップ判定を実行！
+    if (!moved) {
+        handleTap(e);
+    }
+});
+
+function updateTransform() { 
+    viewport.setAttribute('transform', `translate(${pointX}, ${pointY}) scale(${scale})`); 
+}
+
+// タップされた時の処理
+function handleTap(e) {
+    const rect = container.getBoundingClientRect();
+    const svgX = (e.clientX - rect.left - pointX) / scale;
+    const svgY = (e.clientY - rect.top - pointY) / scale;
+
+    if(svgX < 0 || svgX > 400 || svgY < 0 || svgY > 400) return;
+
+    if (!ballPos) {
+        ballPos = { x: svgX, y: svgY }; 
+        setMarker('ballMarker', svgX, svgY);
+        document.getElementById('statusBar').innerText = "次に【ピン位置】をタップしてください";
+    } else if (!pinPos) {
+        pinPos = { x: svgX, y: svgY }; 
+        setMarker('pinMarker', svgX, svgY);
+        document.getElementById('statusBar').innerText = "計算完了！";
+        
+        const line = document.getElementById('traceLine');
+        line.setAttribute('x1', ballPos.x); line.setAttribute('y1', ballPos.y);
+        line.setAttribute('x2', pinPos.x);  line.setAttribute('y2', pinPos.y);
+        line.style.display = 'block';
+
+        runPhysicalSimulation(ballPos, pinPos);
+    }
+}
+
+function setMarker(id, x, y) {
+    const marker = document.getElementById(id);
+    marker.setAttribute('cx', x); marker.setAttribute('cy', y); marker.style.display = 'block';
+}
+
+// 物理演算＆距離計算エンジン
+function runPhysicalSimulation(p1, p2) {
+    const highlightGroup = document.getElementById('highlightGroup');
+    highlightGroup.innerHTML = ''; 
+    const stimp = parseFloat(document.getElementById('stimp').value);
+    
+    // 画像全体（400px）を実際の「40ヤード（約36.58m）」として換算
+    const pxToYard = 40 / 400;
+    const yardToMeter = 0.9144;
+    
+    const dx = p2.x - p1.x; 
+    const dy = p2.y - p1.y;
+    const distancePx = Math.hypot(dx, dy);
+    
+    // 【新機能】残り距離の計算（ヤードとメートル）
+    const distanceYards = distancePx * pxToYard;
+    const distanceMeters = distanceYards * yardToMeter;
+
+    // 画面に残り距離を表示
+    document.getElementById('distanceOut').innerText = 
+        `📏 残り距離: ${distanceYards.toFixed(1)} ヤード (約 ${distanceMeters.toFixed(1)} m)`;
+
+    let velocity = 4.5 * (10 / stimp) * (distanceMeters / 5);
+    const dt = 0.02; 
+    const friction = 2.2 * (10 / stimp);
+
+    let currentX = p1.x; 
+    let currentY = p1.y;
+    const angleX = dx / distancePx; 
+    const angleY = dy / distancePx;
+    
+    let totalSideDeviationMeters = 0;
+    let checkedCells = new Set();
+    let traveledDistancePx = 0;
+    
+    while (velocity > 0.1 && traveledDistancePx < distancePx) {
+        const gridX = Math.floor(currentX / 10);
+        const gridY = Math.floor(currentY / 10);
+        const mapKey = `${gridX},${gridY}`;
+
+        const cellData = greenSlopeMap[mapKey] || { slope: 1.5, angle: 180 };
+
+        if (!checkedCells.has(mapKey)) {
+            checkedCells.add(mapKey);
+            highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gridX*10}" y="${gridY*10}" width="10" height="10" />`;
+        }
+
+        const slopeRad = cellData.slope * (Math.PI / 180);
+        const slopeAngleRad = cellData.angle * (Math.PI / 180);
+        
+        const padAngle = Math.atan2(dy, dx);
+        const forceAngle = slopeAngleRad - padAngle;
+        const forceSide = Math.sin(slopeRad) * Math.sin(forceAngle);
+        
+        totalSideDeviationMeters += (forceSide * 9.8 * dt) * (4.5 / velocity);
+
+        const stepPx = (velocity * dt) / (36.58 / 400); // メートルからピクセルへの換算
+        currentX += angleX * stepPx; 
+        currentY += angleY * stepPx;
+        traveledDistancePx += stepPx;
+        
+        velocity -= friction * dt;
+    }
+
+    const cupWidth = 0.108;
+    const finalCups = totalSideDeviationMeters / cupWidth;
+
+    const uiResult = document.getElementById('uiResult');
+    if (Math.abs(finalCups) < 0.3) {
+        uiResult.innerText = "ほぼストレートに狙う";
+    } else {
+        const direction = finalCups > 0 ? "右" : "左";
+        uiResult.innerText = `${direction}に ${Math.abs(finalCups).toFixed(1)} カップ外す\n(総曲がり幅: 約 ${(Math.abs(totalSideDeviationMeters)*100).toFixed(1)}cm)`;
+    }
+}
+
+function resetApp() {
+    ballPos = null; pinPos = null;
+    document.getElementById('ballMarker').style.display = 'none';
+    document.getElementById('pinMarker').style.display = 'none';
+    document.getElementById('traceLine').style.display = 'none';
+    document.getElementById('highlightGroup').innerHTML = '';
+    document.getElementById('distanceOut').innerText = '';
+    document.getElementById('statusBar').innerText = "【2本指で拡大移動】/【タップしてBとPを配置】";
+    document.getElementById('uiResult').innerText = "画面をタップしてスタート";
+}
+</script>
+
+</body>
+</html>
