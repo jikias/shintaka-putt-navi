@@ -3,6 +3,254 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GOLF PUTT NAVI - PRO 18 (Corrected)</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; margin: 0; background: #121212; color: #fff; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        .header { padding: 12px; text-align: center; background: #1e5631; font-weight: bold; }
+        .status-bar { padding: 6px; font-size: 0.8rem; color: #aaa; text-align: center; background: #000; }
+        #canvas-container { width: 100vw; flex-grow: 1; position: relative; overflow: hidden; touch-action: none; }
+        svg { width: 100%; height: 100%; position: absolute; }
+        .controls { padding: 15px; background: #222; border-top: 1px solid #444; }
+        .result-text { font-size: 1.1rem; font-weight: bold; color: #ffeb3b; text-align: center; margin: 10px 0; white-space: pre-line; }
+    </style>
+</head>
+<body>
+    <div class="header">GOLF PUTT NAVI</div>
+    <div class="status-bar" id="statusBar">ホールを選択してください</div>
+    
+    <div class="page" id="page-game" style="display: flex; flex-direction: column; height: 100%;">
+        <div id="canvas-container">
+            <svg id="greenSvg" viewBox="0 0 400 400">
+                <image id="mapImage" width="400" height="400" />
+                <g id="highlightGroup"></g>
+                <line id="traceLine" stroke="#fff" stroke-width="3" stroke-dasharray="6,6" style="display:none;"/>
+                <circle id="ballMarker" r="8" fill="#2196f3" style="display:none;"/>
+                <circle id="pinMarker" r="8" fill="#f44336" style="display:none;"/>
+            </svg>
+        </div>
+        <div class="controls">
+            <div class="result-text" id="uiResult">タップでボールとピンを配置</div>
+            <button onclick="resetApp()" style="width: 100%; padding: 10px;">リセット</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { HOLE_DATABASES } from './data.js';
+        window.HOLE_DATABASES = HOLE_DATABASES;
+
+        const greenSlopeMap = {};
+
+// 選択されたホールのデータをもとに空間補完マップを生成する関数
+function buildMapForHole(holeNum) {
+    const sourceData = HOLE_DATABASES[holeNum] || {};
+    
+    // もしそのホールのデータが1箇所も登録されていない場合のデフォルト保険
+    const isDataEmpty = Object.keys(sourceData).length === 0;
+
+    for (let x = 0; x <= 40; x++) {
+        for (let y = 0; y <= 40; y++) {
+            const currentKey = `${x},${y}`;
+            
+            if (sourceData[currentKey]) {
+                greenSlopeMap[currentKey] = sourceData[currentKey];
+                continue;
+            }
+
+            if (isDataEmpty) {
+                // データが全くないホール（14番など）は一律で「1.0度の手前受けグリーン」にして大怪我を防ぐ
+                greenSlopeMap[currentKey] = { slope: 1.0, angle: 180 };
+                continue;
+            }
+
+            // IDW空間補完計算
+            let totalWeight = 0, weightedSlopeSum = 0, weightedAngleX = 0, weightedAngleY = 0;
+            for (const [knownKey, data] of Object.entries(sourceData)) {
+                const [kx, ky] = knownKey.split(',').map(Number);
+                const distance = Math.hypot(x - kx, y - ky);
+                if (distance === 0) { weightedSlopeSum = data.slope; totalWeight = 1; break; }
+                const weight = 1 / Math.pow(distance, 2);
+                weightedSlopeSum += data.slope * weight;
+                const rad = data.angle * (Math.PI / 180);
+                weightedAngleX += Math.sin(rad) * weight; weightedAngleY += Math.cos(rad) * weight;
+                totalWeight += weight;
+            }
+            if (totalWeight > 0) {
+                const finalSlope = weightedSlopeSum / totalWeight;
+                const finalRad = Math.atan2(weightedAngleX / totalWeight, weightedAngleY / totalWeight);
+                let finalAngle = finalRad * (180 / Math.PI);
+                if (finalAngle < 0) finalAngle += 360;
+                greenSlopeMap[currentKey] = { slope: parseFloat(finalSlope.toFixed(1)), angle: Math.round(finalAngle) };
+            } else {
+                greenSlopeMap[currentKey] = { slope: 1.5, angle: 180 };
+            }
+        }
+    }
+}
+
+// ========================================================
+// 画面の構築と切り替え制御
+// ========================================================
+let currentHole = null;
+let ballPos = null, pinPos = null;
+let scale = 1.0, pointX = 0, pointY = 0, startX = 0, startY = 0, isPanning = false, startDist = 0, moved = false;
+
+const viewport = document.getElementById('viewport');
+const container = document.getElementById('canvas-container');
+
+// 1〜18番ホールの選択ボタン自動生成
+const holeGrid = document.getElementById('hole-grid');
+for (let i = 1; i <= 18; i++) {
+    const btn = document.createElement('div');
+    btn.className = 'hole-btn';
+    
+    // 【新仕様】14番ホールだけは完全に無効化（ disabled クラスを追加 ）
+    if (i === 14) {
+        btn.className = 'hole-btn disabled';
+    }
+    
+    btn.innerText = `${i} ホール`;
+    btn.onclick = function() { if(i !== 14) selectHole(i); };
+    holeGrid.appendChild(btn);
+}
+
+function syncGlobalSettings() {
+    const globalSpeed = document.getElementById('global-stimp').value;
+    const globalOverlap = document.getElementById('global-overlap').value;
+    const localStimp = document.getElementById('stimp');
+    localStimp.innerHTML = document.getElementById('global-stimp').innerHTML;
+    localStimp.value = globalSpeed;
+    document.getElementById('overlap').value = globalOverlap;
+}
+
+function selectHole(num) {
+    currentHole = num;
+    syncGlobalSettings();
+    
+    // 【新機能】画像ファイルをホールの番号（1.jpg 〜 18.jpg）に合わせて動的に書き換える！
+    document.getElementById('mapImage').setAttribute('href', `${num}.jpg`);
+    
+    // そのホールのための傾斜マップを裏側で一瞬で構築
+    buildMapForHole(num);
+    
+    document.getElementById('page-home').classList.remove('active');
+    document.getElementById('page-game').classList.add('active');
+    document.getElementById('mainHeader').innerText = `HOLE ${num} - GREEN`;
+    document.getElementById('statusBar').innerText = "【2本指で拡大移動】 / 【タップして配置】";
+    resetApp();
+}
+
+function goBackHome() {
+    document.getElementById('page-game').classList.remove('active');
+    document.getElementById('page-home').classList.add('active');
+    document.getElementById('mainHeader').innerText = "GOLF PUTT NAVI";
+    document.getElementById('statusBar').innerText = "ホールを選択してください";
+    currentHole = null;
+}
+
+function reCalculate() { if (ballPos && pinPos) runPhysicalSimulation(ballPos, pinPos); }
+
+// ========================================================
+// 操作イベントと物理演算エンジン
+// ========================================================
+container.addEventListener('pointerdown', function(e) {
+    moved = false;
+    const touches = e.targetTouches || [e];
+    if (e.pointerType === 'touch' && touches.length === 2) { 
+        isPanning = false; 
+        startDist = Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY); 
+    } else { 
+        isPanning = true; startX = e.clientX - pointX; startY = e.clientY - pointY; 
+    }
+});
+container.addEventListener('pointermove', function(e) { if (isPanning) { pointX = e.clientX - startX; pointY = e.clientY - startY; updateTransform(); moved = true; }});
+container.addEventListener('touchmove', function(e) {
+    if (e.touches.length === 2) {
+        isPanning = false; const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        if (startDist > 0) { scale = Math.min(Math.max(scale * (dist / startDist), 0.5), 4.0); updateTransform(); }
+        startDist = dist; moved = true;
+    }
+}, {passive: true});
+container.addEventListener('pointerup', function(e) { isPanning = false; startDist = 0; if (!moved) handleTap(e); });
+function updateTransform() { viewport.setAttribute('transform', `translate(${pointX}, ${pointY}) scale(${scale})`); }
+
+function handleTap(e) {
+    if (!currentHole) return;
+    const rect = container.getBoundingClientRect();
+    const svgX = (e.clientX - rect.left - pointX) / scale;
+    const svgY = (e.clientY - rect.top - pointY) / scale;
+    if(svgX < 0 || svgX > 400 || svgY < 0 || svgY > 400) return;
+
+    if (!ballPos) {
+        ballPos = { x: svgX, y: svgY }; setMarker('ballMarker', svgX, svgY);
+        document.getElementById('statusBar').innerText = "次に【ピン位置】をタップしてください";
+    } else if (!pinPos) {
+        pinPos = { x: svgX, y: svgY }; setMarker('pinMarker', svgX, svgY);
+        document.getElementById('statusBar').innerText = "計算完了！";
+        const line = document.getElementById('traceLine');
+        line.setAttribute('x1', ballPos.x); line.setAttribute('y1', ballPos.y);
+        line.setAttribute('x2', pinPos.x);  line.setAttribute('y2', pinPos.y);
+        line.style.display = 'block';
+        runPhysicalSimulation(ballPos, pinPos);
+    }
+}
+
+function setMarker(id, x, y) {
+    const marker = document.getElementById(id);
+    marker.setAttribute('cx', x); marker.setAttribute('cy', y); marker.style.display = 'block';
+}
+
+
+        function runPhysicalSimulation(p1, p2) {
+            const stimp = 10.0; // 固定値または選択値
+            const overlapMeters = 0.1;
+            
+            const dx = p2.x - p1.x; const dy = p2.y - p1.y;
+            const distancePx = Math.hypot(dx, dy);
+            const angleLine = Math.atan2(dy, dx); // 打ち出し方向
+
+            let velocity = 3.0; // 初速の目安
+            let currentX = p1.x; let currentY = p1.y;
+            let sideDeviation = 0; // 左右のズレ（+右, -左）
+            let heightAccum = 0;   // 高低差の蓄積（+下り, -上り）
+
+            // 物理シミュレーションループ
+            for(let i=0; i<100; i++) {
+                const gridX = Math.floor(currentX / 10); 
+                const gridY = Math.floor(currentY / 10);
+                const cell = greenSlopeMap[`${gridX},${gridY}`] || {slope: 0, angle: 180};
+                
+                // 傾斜の角度をラジアンに変換 (0度が真上=上り)
+                const slopeRad = cell.slope * Math.PI / 180;
+                const slopeDir = cell.angle * Math.PI / 180;
+                
+                // 打ち出し線に対する傾斜の影響
+                // 左右のズレ: sin(傾斜角 - 打ち出し角)
+                sideDeviation += Math.sin(slopeDir - angleLine) * Math.sin(slopeRad);
+                
+                // 高低差: cos(傾斜角 - 打ち出し角)
+                // この値が正なら下り(加速)、負なら上り(減速)として定義
+                heightAccum += Math.cos(slopeDir - angleLine) * Math.sin(slopeRad);
+                
+                currentX += Math.cos(angleLine) * 4;
+                currentY += Math.sin(angleLine) * 4;
+            }
+
+            // 結果表示ロジック
+            const ui = document.getElementById('uiResult');
+            const dir = sideDeviation > 0 ? "右" : "左";
+            const heightDir = heightAccum > 0 ? "下り" : "上り";
+            ui.innerText = `カップより${dir}へ${Math.abs(sideDeviation).toFixed(1)}カップ\n(${heightDir} ${Math.abs(heightAccum*100).toFixed(0)}cm相当)`;
+        }
+    </script>
+</body>
+</html>
+
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>GOLF PUTT NAVI - 完全版(V10)</title>
     <style>
         body {
