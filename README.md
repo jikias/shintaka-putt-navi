@@ -1,0 +1,1 @@
+# shintaka-putt-navi
