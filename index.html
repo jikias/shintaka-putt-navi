@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - 完全版(V10) 修正版</title>
+    <title>GOLF PUTT NAVI - 完全版(V10) 最終修正版</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -146,7 +146,6 @@
 
     const greenSlopeMap = {};
 
-    // 選択されたホールのデータをもとに空間補完マップを生成する関数
     function buildMapForHole(holeNum) {
         const sourceData = window.HOLE_DATABASES[holeNum] || {};
         const isDataEmpty = Object.keys(sourceData).length === 0;
@@ -165,7 +164,6 @@
                     continue;
                 }
 
-                // IDW空間補完計算
                 let totalWeight = 0, weightedSlopeSum = 0, weightedAngleX = 0, weightedAngleY = 0;
                 for (const [knownKey, data] of Object.entries(sourceData)) {
                     const [kx, ky] = knownKey.split(',').map(Number);
@@ -190,7 +188,6 @@
         }
     }
 
-    // グローバル変数定義
     let currentHole = null;
     let ballPos = null, pinPos = null;
     let scale = 1.0, pointX = 0, pointY = 0, startX = 0, startY = 0, isPanning = false, startDist = 0, moved = false;
@@ -198,7 +195,6 @@
     const viewport = document.getElementById('viewport');
     const container = document.getElementById('canvas-container');
 
-    // 1〜18番ホールの選択ボタン自動生成
     const holeGrid = document.getElementById('hole-grid');
     for (let i = 1; i <= 18; i++) {
         const btn = document.createElement('div');
@@ -241,140 +237,8 @@
 
     window.reCalculate = function() { if (ballPos && pinPos) runPhysicalSimulation(ballPos, pinPos); }
 
-    // 操作イベント
     container.addEventListener('pointerdown', function(e) {
         moved = false;
         const touches = e.targetTouches || [e];
         if (e.pointerType === 'touch' && touches.length === 2) { 
-            isPanning = false; 
-            startDist = Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY); 
-        } else { 
-            isPanning = true; startX = e.clientX - pointX; startY = e.clientY - pointY; 
-        }
-    });
-    container.addEventListener('pointermove', function(e) { if (isPanning) { pointX = e.clientX - startX; pointY = e.clientY - startY; updateTransform(); moved = true; }});
-    container.addEventListener('touchmove', function(e) {
-        if (e.touches.length === 2) {
-            isPanning = false; const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-            if (startDist > 0) { scale = Math.min(Math.max(scale * (dist / startDist), 0.5), 4.0); updateTransform(); }
-            startDist = dist; moved = true;
-        }
-    }, {passive: true});
-    container.addEventListener('pointerup', function(e) { isPanning = false; startDist = 0; if (!moved) handleTap(e); });
-    
-    function updateTransform() { viewport.setAttribute('transform', `translate(${pointX}, ${pointY}) scale(${scale})`); }
-
-    function handleTap(e) {
-        if (!currentHole) return;
-        const rect = container.getBoundingClientRect();
-        const svgX = (e.clientX - rect.left - pointX) / scale;
-        const svgY = (e.clientY - rect.top - pointY) / scale;
-        if(svgX < 0 || svgX > 400 || svgY < 0 || svgY > 400) return;
-
-        if (!ballPos) {
-            ballPos = { x: svgX, y: svgY }; setMarker('ballMarker', svgX, svgY);
-            document.getElementById('statusBar').innerText = "次に【ピン位置】をタップしてください";
-        } else if (!pinPos) {
-            pinPos = { x: svgX, y: svgY }; setMarker('pinMarker', svgX, svgY);
-            document.getElementById('statusBar').innerText = "計算完了！";
-            const line = document.getElementById('traceLine');
-            line.setAttribute('x1', ballPos.x); line.setAttribute('y1', ballPos.y);
-            line.setAttribute('x2', pinPos.x);  line.setAttribute('y2', pinPos.y);
-            line.style.display = 'block';
-            runPhysicalSimulation(ballPos, pinPos);
-        }
-    }
-
-    function setMarker(id, x, y) {
-        const marker = document.getElementById(id);
-        marker.setAttribute('cx', x); marker.setAttribute('cy', y); marker.style.display = 'block';
-    }
-
-    // 精密物理演算エンジン (V10準拠 ＋ 高低差・左右符号修正版)
-    function runPhysicalSimulation(p1, p2) {
-        const highlightGroup = document.getElementById('highlightGroup');
-        highlightGroup.innerHTML = ''; 
-        const stimp = parseFloat(document.getElementById('stimp').value);
-        const overlapMeters = parseFloat(document.getElementById('overlap').value);
-
-        const pxToYard = 40 / 400; const yardToMeter = 0.9144;
-        const dx = p2.x - p1.x; const dy = p2.y - p1.y;
-        const distancePx = Math.hypot(dx, dy);
-        const distanceYards = distancePx * pxToYard; const distanceMeters = distanceYards * yardToMeter;
-
-        document.getElementById('distanceOut').innerText = `📏 距離: ${distanceYards.toFixed(1)} ヤード (約 ${distanceMeters.toFixed(1)} m)`;
-
-        const targetDistanceMeters = distanceMeters + overlapMeters;
-        let velocity = 4.5 * (10 / stimp) * (targetDistanceMeters / 5);
-        const dt = 0.02; const friction = 2.2 * (10 / stimp);
-
-        let currentX = p1.x; let currentY = p1.y;
-        const angleX = dx / distancePx; const angleY = dy / distancePx;
-        let totalSideDeviationMeters = 0; let totalHeightDeviationMeters = 0; 
-        let checkedCells = new Set(); let traveledDistancePx = 0;
-        
-        while (velocity > 0.1 && traveledDistancePx < distancePx) {
-            const gridX = Math.floor(currentX / 10); const gridY = Math.floor(currentY / 10);
-            const mapKey = `${gridX},${gridY}`;
-            const cellData = greenSlopeMap[mapKey] || { slope: 1.5, angle: 180 };
-
-            if (!checkedCells.has(mapKey)) {
-                checkedCells.add(mapKey);
-                highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gridX*10}" y="${gridY*10}" width="10" height="10" />`;
-            }
-
-            const slopeRad = cellData.slope * (Math.PI / 180); 
-            const slopeAngleRad = cellData.angle * (Math.PI / 180);
-            const padAngle = Math.atan2(dy, dx); 
-            
-            // 【バグ修正】打ち出し角度に対する傾斜角度の相対ベクトルを修正
-            const forceAngle = slopeAngleRad - padAngle;
-            
-            // 左右の曲がり幅計算
-            const forceSide = Math.sin(slopeRad) * Math.sin(forceAngle);
-            totalSideDeviationMeters += (forceSide * 9.8 * dt) * (4.5 / velocity);
-
-            // 【高低差逆転の修正】
-            // 元コードの forceForward の符号を反転し、順目（下り）の時に正（加速）、逆目（上り）の時に負（減速）になるよう修正
-            const forceForward = -Math.sin(slopeRad) * Math.cos(forceAngle);
-            const stepMeter = (velocity * dt);
-            totalHeightDeviationMeters += (forceForward * stepMeter);
-
-            const stepPx = stepMeter / (36.58 / 400);
-            currentX += angleX * stepPx; currentY += angleY * stepPx;
-            traveledDistancePx += stepPx; velocity -= friction * dt;
-        }
-
-        const heightCm = totalHeightDeviationMeters * 100;
-        // 蓄積された値がプラスなら「下り」、マイナスなら「上り」
-        const heightType = heightCm > 0 ? "下り" : "上り";
-        document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(heightCm).toFixed(1)} cm の 【${heightType}】`;
-
-        const finalCups = totalSideDeviationMeters / 0.108;
-        const uiResult = document.getElementById('uiResult');
-        if (Math.abs(finalCups) < 0.3) {
-            uiResult.innerText = "ほぼストレートに狙う";
-        } else {
-            const directionCorrected = finalCups > 0 ? "右" : "左";
-            const overlapText = overlapMeters === 0.1 ? "10cm強" : "30cm強";
-            uiResult.innerText = `${directionCorrected}に ${Math.abs(finalCups).toFixed(1)} カップ外す\n(カップを${overlapText}オーバーする強さで)`;
-        }
-    }
-
-    window.resetApp = function() {
-        ballPos = null; pinPos = null;
-        document.getElementById('ballMarker').style.display = 'none';
-        document.getElementById('pinMarker').style.display = 'none';
-        document.getElementById('traceLine').style.display = 'none';
-        document.getElementById('highlightGroup').innerHTML = '';
-        document.getElementById('distanceOut').innerText = '';
-        document.getElementById('heightOut').innerText = '';
-        if (currentHole) {
-            document.getElementById('statusBar').innerText = "【2本指で拡大移動】 / 【タップして配置】";
-            document.getElementById('uiResult').innerText = "画面をタップしてスタート";
-        }
-    }
-</script>
-
-</body>
-</html>
+            isPanning = false
