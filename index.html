@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - 完全版(V10) 最終修正版( Saiki様仕様)</title>
+    <title>GOLF PUTT NAVI - COMPLETE V10 (Coordinates Fixed)</title>
     <style>
-        body { font-family: sans-serif; margin: 0; background: #121212; color: #fff; height: 100vh; display: flex; flex-direction: column; }
+        body { font-family: -apple-system, sans-serif; margin: 0; background: #121212; color: #fff; height: 100vh; display: flex; flex-direction: column; }
         .header { padding: 15px; text-align: center; background: #1e5631; font-weight: bold; }
         .page { display: none; width: 100%; flex-grow: 1; flex-direction: column; align-items: center; }
         .page.active { display: flex; }
@@ -84,7 +84,10 @@
         function runSim() {
             const dx = pinPos.x - ballPos.x, dy = pinPos.y - ballPos.y;
             const dist = Math.hypot(dx, dy);
-            const angleLine = Math.atan2(dy, dx);
+            
+            // 【根本修正】数学坐标系(0=右)からゴルフ坐标系(90=右、180=下、270=左)へ角度基準を修正
+            const angleLine = Math.atan2(dy, dx) - Math.PI/2; 
+
             let side = 0, height = 0, curX = ballPos.x, curY = ballPos.y;
 
             for(let i=0; i<100; i++) {
@@ -92,7 +95,7 @@
                 const cell = greenSlopeMap[`${gx},${gy}`] || {slope: 1.0, angle: 180};
                 const sRad = cell.slope * Math.PI/180;
                 
-                // V10: 左右偏差と高低差の詳細なシミュレーション
+                // 物理判定ロジックそのものは変更なし（基準角度が変わったため、計算結果が正しくなる）
                 side += Math.sin(cell.angle*Math.PI/180 - angleLine) * Math.sin(sRad);
                 height += Math.cos(cell.angle*Math.PI/180 - angleLine) * Math.sin(sRad);
                 
@@ -100,13 +103,11 @@
                 curY += Math.sin(angleLine) * (dist/100);
             }
             
-            // finalCupsの符号判定を修正 ( Saiki様のご指摘を反映 )
-            // finalCupsがマイナス（左からの力＝スライス）の時、カップの「左」を狙い（左に外す）、
-            // プラス（右からの力＝フック）の時、カップの「右」を狙う。
-            const directionCorrected = side < 0 ? "左" : "右";
+            // 表示符号も本来の「符号＝そのまま左右」に戻します
+            const directionCorrected = side > 0 ? "右" : "左";
             
             document.getElementById('uiResult').innerText = 
-                `カップの 【${directionCorrected}】 に ${Math.abs(side).toFixed(1)} カップ外す\n(${height>0?'下り':'上り'} ${Math.abs(height*200).toFixed(0)}cm相当)`;
+                `カップより${directionCorrected}へ${Math.abs(side).toFixed(1)}カップ外す\n(${height>0?'下り':'上り'} ${Math.abs(height*200).toFixed(0)}cm相当)`;
             
             const line = document.getElementById('traceLine');
             line.setAttribute('x1', ballPos.x); line.setAttribute('y1', ballPos.y);
