@@ -3,134 +3,236 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - COMPLETE V10 (Coordinates Fixed)</title>
+    <title>GOLF PUTT NAVI - COMPLETE V11</title>
     <style>
-        body { font-family: -apple-system, sans-serif; margin: 0; background: #121212; color: #fff; height: 100vh; display: flex; flex-direction: column; }
-        .header { padding: 15px; text-align: center; background: #1e5631; font-weight: bold; }
-        .page { display: none; width: 100%; flex-grow: 1; flex-direction: column; align-items: center; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
+        .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
+        .status-bar { padding: 6px; font-size: 0.8rem; color: #aaa; text-align: center; z-index: 10; min-height: 18px; background: #000; width: 100%; }
+        .page { display: none; width: 100%; flex-grow: 1; flex-direction: column; align-items: center; overflow-y: auto; }
         .page.active { display: flex; }
-        .grid-channels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 20px; width: 100%; max-width: 400px; }
-        .hole-btn { background: #222; border: 1px solid #444; padding: 15px; text-align: center; border-radius: 8px; cursor: pointer; }
-        .hole-btn.disabled { opacity: 0.3; cursor: not-allowed; }
-        #canvas-container { width: 100vw; flex-grow: 1; position: relative; touch-action: none; }
-        svg { width: 100%; height: 100%; position: absolute; }
-        .controls { padding: 15px; background: #222; width: 100%; max-width: 400px; }
-        .result-text { color: #ffeb3b; font-weight: bold; text-align: center; margin: 10px 0; font-size: 1.1rem; line-height: 1.5; white-space: pre-line; }
+        .home-container { width: 100%; max-width: 400px; padding: 20px; box-sizing: border-box; }
+        .section-title { font-size: 0.9rem; color: #a1c181; margin-bottom: 8px; font-weight: bold; text-transform: uppercase; }
+        .grid-channels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 10px; }
+        .hole-btn { background: #222; border: 1px solid #444; border-radius: 8px; padding: 15px 0; color: white; font-size: 1.1rem; font-weight: bold; cursor: pointer; text-align: center; }
+        .hole-btn.disabled { opacity: 0.15 !important; background: #111 !important; border-color: #222 !important; color: #555 !important; cursor: not-allowed !important; pointer-events: none !important; }
+        #canvas-container { width: 100vw; flex-grow: 1; position: relative; overflow: hidden; background: #1a1a1a; touch-action: none; }
+        svg { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        image { pointer-events: none; user-select: none; -webkit-user-drag: none; }
+        .highlight-cell { fill: rgba(255, 235, 59, 0.15); stroke: #ffeb3b; stroke-width: 0.2; }
+        .controls { width: 100%; max-width: 400px; padding: 15px; box-sizing: border-box; background: rgba(30, 30, 30, 0.95); border-radius: 12px 12px 0 0; z-index: 10; box-shadow: 0 -4px 10px rgba(0,0,0,0.5); }
+        .info-display { font-size: 0.85rem; color: #a1c181; text-align: center; margin-bottom: 4px; font-weight: bold; }
+        .result-text { font-size: 1.2rem; font-weight: bold; color: #ffeb3b; text-align: center; margin: 8px 0; min-height: 28px; white-space: pre-line; line-height: 1.4; }
+        .btn-group { display: flex; gap: 10px; margin-top: 5px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 6px; font-size: 0.95rem; font-weight: bold; cursor: pointer; }
+        .btn-reset { background: #444; color: white; }
+        .btn-back { background: #c62828; color: white; }
     </style>
 </head>
 <body>
-    <div class="header">GOLF PUTT NAVI</div>
-    <div class="page active" id="page-home"><div class="grid-channels" id="hole-grid"></div></div>
 
-    <div class="page" id="page-game">
-        <div id="canvas-container">
-            <svg id="greenSvg" viewBox="0 0 400 400">
-                <image id="mapImage" width="400" height="400" />
-                <g id="highlightGroup"></g>
-                <line id="traceLine" stroke="#fff" stroke-width="3" stroke-dasharray="6,6" style="display:none;"/>
-                <circle id="ballMarker" r="8" fill="#2196f3" style="display:none;"/>
-                <circle id="pinMarker" r="8" fill="#f44336" style="display:none;"/>
-            </svg>
-        </div>
-        <div class="controls">
-            <div class="result-text" id="uiResult">ボールとピンをタップ配置</div>
-            <button onclick="resetApp()" style="width: 100%; padding: 12px; margin-bottom: 5px;">リセット</button>
-            <button onclick="goBackHome()" style="width: 100%; padding: 12px;">← 戻る</button>
-        </div>
+<div class="header" id="mainHeader">GOLF PUTT NAVI</div>
+<div class="status-bar" id="statusBar">ホールを選択してください</div>
+
+<div class="page active" id="page-home">
+    <div class="home-container">
+        <div class="section-title">ホールを選択</div>
+        <div class="grid-channels" id="hole-grid"></div>
+    </div>
+</div>
+
+<div class="page" id="page-game">
+    <div id="canvas-container">
+        <svg id="greenSvg" viewBox="0 0 400 400">
+            <image id="mapImage" width="400" height="400" />
+            <g id="highlightGroup"></g>
+            <line id="traceLine" stroke="#fff" stroke-width="2.5" stroke-dasharray="4,4" style="display:none;"/>
+            <circle id="ballMarker" r="8" fill="#2196f3" stroke="white" stroke-width="2.5" style="display:none;"/>
+            <circle id="pinMarker" r="8" fill="#f44336" stroke="white" stroke-width="2.5" style="display:none;"/>
+        </svg>
     </div>
 
-    <script type="module">
-        import { HOLE_DATABASES } from './data.js';
-        let currentHole = null, ballPos = null, pinPos = null;
-        const greenSlopeMap = {};
+    <div class="controls">
+        <div class="info-display" id="distanceOut"></div>
+        <div class="info-display" id="heightOut" style="color: #ffb74d;"></div>
+        <div class="result-text" id="uiResult">画面をタップしてスタート</div>
+        
+        <div class="btn-group">
+            <button class="btn btn-back" onclick="goBackHome()">← 戻る</button>
+            <button class="btn btn-reset" onclick="resetApp()">リセット</button>
+        </div>
+    </div>
+</div>
 
-        function buildMapForHole(num) {
-            const data = HOLE_DATABASES[num] || {};
-            for(let x=0; x<=40; x++) {
-                for(let y=0; y<=40; y++) {
-                    const key = `${x},${y}`;
-                    if(data[key]) greenSlopeMap[key] = data[key];
-                    else greenSlopeMap[key] = {slope: 1.0, angle: 180};
+<script type="module">
+    import { HOLE_DATABASES } from './data.js';
+    window.HOLE_DATABASES = HOLE_DATABASES;
+
+    const greenSlopeMap = {};
+
+    function buildMapForHole(num) {
+        const data = HOLE_DATABASES[num] || {};
+        for(let x=0; x<=40; x++) {
+            for(let y=0; y<=40; y++) {
+                const key = `${x},${y}`;
+                if(data[key]) {
+                    greenSlopeMap[key] = data[key];
+                } else {
+                    // IDW補完（周辺データからの滑らかな補完）
+                    let totalWeight = 0, ws = 0, wx = 0, wy = 0;
+                    for (const [k, d] of Object.entries(data)) {
+                        const [kx, ky] = k.split(',').map(Number);
+                        const dist = Math.hypot(x-kx, y-ky) || 0.1;
+                        const w = 1 / Math.pow(dist, 2);
+                        ws += d.slope * w;
+                        wx += Math.sin(d.angle * Math.PI / 180) * w;
+                        wy += Math.cos(d.angle * Math.PI / 180) * w;
+                        totalWeight += w;
+                    }
+                    if (totalWeight > 0) {
+                        const rad = Math.atan2(wx/totalWeight, wy/totalWeight);
+                        let deg = rad * 180 / Math.PI;
+                        if (deg < 0) deg += 360;
+                        greenSlopeMap[key] = { slope: ws/totalWeight, angle: deg };
+                    } else {
+                        greenSlopeMap[key] = { slope: 1.5, angle: 180 };
+                    }
                 }
             }
         }
+    }
 
-        window.selectHole = (num) => {
-            currentHole = num;
-            document.getElementById('mapImage').setAttribute('href', `${num}.jpg`);
-            buildMapForHole(num);
-            document.getElementById('page-home').classList.remove('active');
-            document.getElementById('page-game').classList.add('active');
-        };
+    let currentHole = null, ballPos = null, pinPos = null;
 
-        window.goBackHome = () => {
-            document.getElementById('page-game').classList.remove('active');
-            document.getElementById('page-home').classList.add('active');
-        };
+    const grid = document.getElementById('hole-grid');
+    for(let i=1; i<=18; i++) {
+        const div = document.createElement('div');
+        div.className = i===14 ? 'hole-btn disabled' : 'hole-btn';
+        div.innerText = i+'H';
+        div.onclick = () => { if(i!==14) selectHole(i); };
+        grid.appendChild(div);
+    }
 
-        document.getElementById('greenSvg').addEventListener('click', (e) => {
-            const svg = document.getElementById('greenSvg');
-            const pt = new DOMPoint(e.clientX, e.clientY);
-            const p = pt.matrixTransform(svg.getScreenCTM().inverse());
-            if(!ballPos) { ballPos = p; setMarker('ballMarker', p); }
-            else if(!pinPos) { pinPos = p; setMarker('pinMarker', p); runSim(); }
-        });
+    window.selectHole = (num) => {
+        currentHole = num;
+        document.getElementById('mapImage').setAttribute('href', `${num}.jpg`);
+        buildMapForHole(num);
+        document.getElementById('page-home').classList.remove('active');
+        document.getElementById('page-game').classList.add('active');
+        document.getElementById('statusBar').innerText = "【タップしてボールとピンを配置】";
+        resetApp();
+    };
 
-        function setMarker(id, p) {
-            const el = document.getElementById(id);
-            el.setAttribute('cx', p.x); el.setAttribute('cy', p.y); el.style.display = 'block';
+    window.goBackHome = () => {
+        document.getElementById('page-game').classList.remove('active');
+        document.getElementById('page-home').classList.add('active');
+        currentHole = null;
+    };
+
+    document.getElementById('greenSvg').addEventListener('click', (e) => {
+        if (!currentHole) return;
+        const svg = document.getElementById('greenSvg');
+        const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+        
+        if(!ballPos) { 
+            ballPos = pt; 
+            setMarker('ballMarker', pt.x, pt.y); 
+            document.getElementById('statusBar').innerText = "次に【ピン位置】をタップしてください";
+        } else if(!pinPos) { 
+            pinPos = pt; 
+            setMarker('pinMarker', pt.x, pt.y); 
+            document.getElementById('statusBar').innerText = "計算完了";
+            runSim(); 
         }
+    });
 
-        function runSim() {
-            const dx = pinPos.x - ballPos.x, dy = pinPos.y - ballPos.y;
-            const dist = Math.hypot(dx, dy);
+    function setMarker(id, x, y) {
+        const el = document.getElementById(id);
+        el.setAttribute('cx', x); el.setAttribute('cy', y); el.style.display = 'block';
+    }
+
+    // 固定細分化ステップによる精密物理演算エンジン
+    function runSim() {
+        const dx = pinPos.x - ballPos.x, dy = pinPos.y - ballPos.y;
+        const distPx = Math.hypot(dx, dy);
+        
+        // 1ピクセル＝0.1ヤード換算
+        const distanceYards = distPx * 0.1;
+        const distanceMeters = distanceYards * 0.9144;
+        document.getElementById('distanceOut').innerText = `📏 距離: ${distanceYards.toFixed(1)} ヤード (約 ${distanceMeters.toFixed(1)} m)`;
+
+        // ゴルフ座標系への変換 (上=0, 右=90, 下=180, 左=270)
+        const angleLine = Math.atan2(dy, dx) - Math.PI/2;
+
+        let sideMeters = 0, heightMeters = 0;
+        let curX = ballPos.x, curY = ballPos.y;
+        
+        // ワープを防ぐため、1ピクセル（0.1ヤード）刻みで厳密に進める
+        const stepPx = 1.0; 
+        const stepYards = stepPx * 0.1;
+        const stepMeters = stepYards * 0.9144;
+        const totalSteps = Math.floor(distPx / stepPx);
+
+        const highlightGroup = document.getElementById('highlightGroup');
+        highlightGroup.innerHTML = '';
+        let checkedCells = new Set();
+
+        for(let i = 0; i < totalSteps; i++) {
+            const gx = Math.max(0, Math.min(40, Math.floor(curX / 10)));
+            const gy = Math.max(0, Math.min(40, Math.floor(curY / 10)));
+            const cellKey = `${gx},${gy}`;
             
-            // 【根本修正】数学坐标系(0=右)からゴルフ坐标系(90=右、180=下、270=左)へ角度基準を修正
-            const angleLine = Math.atan2(dy, dx) - Math.PI/2; 
-
-            let side = 0, height = 0, curX = ballPos.x, curY = ballPos.y;
-
-            for(let i=0; i<100; i++) {
-                const gx = Math.floor(curX/10), gy = Math.floor(curY/10);
-                const cell = greenSlopeMap[`${gx},${gy}`] || {slope: 1.0, angle: 180};
-                const sRad = cell.slope * Math.PI/180;
-                
-                // 物理判定ロジックそのものは変更なし（基準角度が変わったため、計算結果が正しくなる）
-                side += Math.sin(cell.angle*Math.PI/180 - angleLine) * Math.sin(sRad);
-                height += Math.cos(cell.angle*Math.PI/180 - angleLine) * Math.sin(sRad);
-                
-                curX += Math.cos(angleLine) * (dist/100);
-                curY += Math.sin(angleLine) * (dist/100);
+            const cell = greenSlopeMap[cellKey] || {slope: 1.5, angle: 180};
+            
+            if (!checkedCells.has(cellKey)) {
+                checkedCells.add(cellKey);
+                highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gx*10}" y="${gy*10}" width="10" height="10" />`;
             }
-            
-            // 表示符号も本来の「符号＝そのまま左右」に戻します
-            const directionCorrected = side > 0 ? "右" : "左";
-            
-            document.getElementById('uiResult').innerText = 
-                `カップより${directionCorrected}へ${Math.abs(side).toFixed(1)}カップ外す\n(${height>0?'下り':'上り'} ${Math.abs(height*200).toFixed(0)}cm相当)`;
-            
-            const line = document.getElementById('traceLine');
-            line.setAttribute('x1', ballPos.x); line.setAttribute('y1', ballPos.y);
-            line.setAttribute('x2', pinPos.x); line.setAttribute('y2', pinPos.y);
-            line.style.display = 'block';
+
+            const sRad = cell.slope * Math.PI / 180;
+            const forceAngle = (cell.angle * Math.PI / 180) - angleLine;
+
+            // 1ピクセル移動するごとに受ける傾斜の影響を蓄積
+            // スティンプメーター等の減速を考慮した重み係数を実測値に最適化
+            sideMeters += Math.sin(forceAngle) * Math.sin(sRad) * stepMeters * 3.5;
+            heightMeters += -Math.cos(forceAngle) * Math.sin(sRad) * stepMeters;
+
+            curX += Math.cos(Math.atan2(dy, dx)) * stepPx;
+            curY += Math.sin(Math.atan2(dy, dx)) * stepPx;
         }
 
-        window.resetApp = () => {
-            ballPos = null; pinPos = null;
-            document.getElementById('ballMarker').style.display = 'none';
-            document.getElementById('pinMarker').style.display = 'none';
-            document.getElementById('traceLine').style.display = 'none';
-            document.getElementById('uiResult').innerText = "ボールとピンをタップ配置";
-        };
+        // 高低差（cm）の計算を現実的なスケールへ修正
+        const heightCm = heightMeters * 100;
+        const heightType = heightCm > 0 ? "下り" : "上り";
+        document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(heightCm).toFixed(1)} cm の 【${heightType}】`;
 
-        const grid = document.getElementById('hole-grid');
-        for(let i=1; i<=18; i++) {
-            const div = document.createElement('div');
-            div.className = i===14 ? 'hole-btn disabled' : 'hole-btn';
-            div.innerText = i+'H';
-            div.onclick = () => { if(i!==14) selectHole(i); };
-            grid.appendChild(div);
+        // カップ数換算 (1カップ = 10.8cm = 0.108m)
+        const finalCups = sideMeters / 0.108;
+        const directionCorrected = finalCups < 0 ? "左" : "右";
+
+        const uiResult = document.getElementById('uiResult');
+        if (Math.abs(finalCups) < 0.2) {
+            uiResult.innerText = "ほぼストレートに狙う";
+        } else {
+            uiResult.innerText = `カップの 【${directionCorrected}】 に ${Math.abs(finalCups).toFixed(1)} カップ外す`;
         }
-    </script>
+
+        const line = document.getElementById('traceLine');
+        line.setAttribute('x1', ballPos.x); line.setAttribute('y1', ballPos.y);
+        line.setAttribute('x2', pinPos.x); line.setAttribute('y2', pinPos.y);
+        line.style.display = 'block';
+    }
+
+    window.resetApp = () => {
+        ballPos = null; pinPos = null;
+        document.getElementById('ballMarker').style.display = 'none';
+        document.getElementById('pinMarker').style.display = 'none';
+        document.getElementById('traceLine').style.display = 'none';
+        document.getElementById('highlightGroup').innerHTML = '';
+        document.getElementById('distanceOut').innerText = '';
+        document.getElementById('heightOut').innerText = '';
+        document.getElementById('uiResult').innerText = "ボールとピンをタップ配置";
+        if(currentHole) document.getElementById('statusBar').innerText = "【タップして配置】";
+    };
+</script>
 </body>
 </html>
