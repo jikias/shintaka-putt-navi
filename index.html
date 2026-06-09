@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - COMPLETE V11</title>
+    <title>GOLF PUTT NAVI - V12 PERFECT</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
         .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
@@ -77,7 +77,6 @@
                 if(data[key]) {
                     greenSlopeMap[key] = data[key];
                 } else {
-                    // IDW補完（周辺データからの滑らかな補完）
                     let totalWeight = 0, ws = 0, wx = 0, wy = 0;
                     for (const [k, d] of Object.entries(data)) {
                         const [kx, ky] = k.split(',').map(Number);
@@ -150,26 +149,29 @@
         el.setAttribute('cx', x); el.setAttribute('cy', y); el.style.display = 'block';
     }
 
-    // 固定細分化ステップによる精密物理演算エンジン
+    // 精密直交物理演算エンジン (V12)
     function runSim() {
-        const dx = pinPos.x - ballPos.x, dy = pinPos.y - ballPos.y;
+        const dx = pinPos.x - ballPos.x;
+        const dy = pinPos.y - ballPos.y; // SVG座標系では下に行くほどプラス
         const distPx = Math.hypot(dx, dy);
         
-        // 1ピクセル＝0.1ヤード換算
+        // スケール定義 (1ピクセル = 0.1ヤード = 0.09144メートル)
+        const stepPx = 1.0; 
+        const pxToMeter = 0.1 * 0.9144;
         const distanceYards = distPx * 0.1;
         const distanceMeters = distanceYards * 0.9144;
+        
         document.getElementById('distanceOut').innerText = `📏 距離: ${distanceYards.toFixed(1)} ヤード (約 ${distanceMeters.toFixed(1)} m)`;
 
-        // ゴルフ座標系への変換 (上=0, 右=90, 下=180, 左=270)
-        const angleLine = Math.atan2(dy, dx) - Math.PI/2;
+        // パットの進行方向ベクトル（単位ベクトル）
+        const padX = dx / distPx;
+        const padY = dy / distPx;
 
-        let sideMeters = 0, heightMeters = 0;
-        let curX = ballPos.x, curY = ballPos.y;
+        let totalSideDeviationMeters = 0;
+        let totalHeightDeviationMeters = 0;
         
-        // ワープを防ぐため、1ピクセル（0.1ヤード）刻みで厳密に進める
-        const stepPx = 1.0; 
-        const stepYards = stepPx * 0.1;
-        const stepMeters = stepYards * 0.9144;
+        let curX = ballPos.x;
+        let curY = ballPos.y;
         const totalSteps = Math.floor(distPx / stepPx);
 
         const highlightGroup = document.getElementById('highlightGroup');
@@ -181,33 +183,49 @@
             const gy = Math.max(0, Math.min(40, Math.floor(curY / 10)));
             const cellKey = `${gx},${gy}`;
             
-            const cell = greenSlopeMap[cellKey] || {slope: 1.5, angle: 180};
+            const cell = greenSlopeMap[cellKey] || {slope: 0, angle: 180};
             
             if (!checkedCells.has(cellKey)) {
                 checkedCells.add(cellKey);
                 highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gx*10}" y="${gy*10}" width="10" height="10" />`;
             }
 
-            const sRad = cell.slope * Math.PI / 180;
-            const forceAngle = (cell.angle * Math.PI / 180) - angleLine;
+            // ヤーテージブックの傾斜角度（上=0, 右=90, 下=180, 左=270）を直交座標のベクトルに変換
+            // ※SVG座標系に合わせるため、下方向をYのプラス、右方向をXのプラスとして定義
+            const slopeRad = cell.angle * Math.PI / 180;
+            const slopeX = Math.sin(slopeRad); // 右方向への傾斜成分
+            const slopeY = -Math.cos(slopeRad); // 下方向への傾斜成分 (180度=真下なら、-cos(180)=+1 で下方向へ正)
 
-            // 1ピクセル移動するごとに受ける傾斜の影響を蓄積
-            // スティンプメーター等の減速を考慮した重み係数を実測値に最適化
-            sideMeters += Math.sin(forceAngle) * Math.sin(sRad) * stepMeters * 3.5;
-            heightMeters += -Math.cos(forceAngle) * Math.sin(sRad) * stepMeters;
+            // 現在の傾斜の強さ（勾配% = tan(傾斜角) ≒ sin(傾斜角)）
+            const grade = Math.sin(cell.slope * Math.PI / 180);
 
-            curX += Math.cos(Math.atan2(dy, dx)) * stepPx;
-            curY += Math.sin(Math.atan2(dy, dx)) * stepPx;
+            // 【高低差の計算】進行方向ベクトルと傾斜ベクトルの内積（同じ向きなら下り、逆向きなら上り）
+            // 進行方向と同じ向きに傾斜が落ちていれば「下り」となり、高さ（位置エネルギー）は減少する
+            const slopeForward = (slopeX * padX + slopeY * padY) * grade;
+            totalHeightDeviationMeters += slopeForward * (stepPx * pxToMeter);
+
+            // 【曲がり幅の計算】パット進行方向の「左側」から受ける傾斜成分を外積（クロスプロダクト）で抽出
+            // 傾斜が進行方向の左から右へ流れているとき、ボールは右へ流されるため、狙いは「左」になる
+            const slopeSide = (slopeX * (-padY) - slopeY * padX) * grade;
+            
+            // 転がり速度による影響の蓄積（実戦値フィッティング係数）
+            totalSideDeviationMeters += slopeSide * (stepPx * pxToMeter) * 4.2;
+
+            curX += padX * stepPx;
+            curY += padY * stepPx;
         }
 
-        // 高低差（cm）の計算を現実的なスケールへ修正
-        const heightCm = heightMeters * 100;
+        // 高低差（cm）の出力を物理的に正しく変換
+        // totalHeightDeviationMetersがプラス＝ボールの進行方向に下っている＝【下り】
+        const heightCm = totalHeightDeviationMeters * 100;
         const heightType = heightCm > 0 ? "下り" : "上り";
         document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(heightCm).toFixed(1)} cm の 【${heightType}】`;
 
         // カップ数換算 (1カップ = 10.8cm = 0.108m)
-        const finalCups = sideMeters / 0.108;
-        const directionCorrected = finalCups < 0 ? "左" : "右";
+        const finalCups = totalSideDeviationMeters / 0.108;
+        
+        // 傾斜が左から来ている（slopeSideがプラス）とき、finalCupsはプラスになり、狙うべき方向はカップの【左】になります
+        const directionCorrected = finalCups > 0 ? "左" : "右";
 
         const uiResult = document.getElementById('uiResult');
         if (Math.abs(finalCups) < 0.2) {
