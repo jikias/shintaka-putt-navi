@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - V20 FINAL PRO</title>
+    <title>GOLF PUTT NAVI - V21 PRO CAPABLE</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
         .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
@@ -54,7 +54,7 @@
     <div class="controls">
         <div class="info-display" id="distanceOut"></div>
         <div class="info-display" id="heightOut" style="color: #ffb74d;"></div>
-        .result-text" id="uiResult">画面をタップしてスタート</div>
+        <div class="result-text" id="uiResult">画面をタップしてスタート</div>
         
         <div class="btn-group">
             <button class="btn btn-back" onclick="goBackHome()">← 戻る</button>
@@ -184,7 +184,6 @@
             
             if (!checkedCells.has(cellKey)) {
                 checkedCells.add(cellKey);
-                // 【バグ完全排除】通常のクリーンなSVG座標指定に修正
                 highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gx*10}" y="${gy*10}" width="10" height="10" />`;
             }
 
@@ -193,10 +192,8 @@
             const slopeY = -Math.cos(slopeRad);
 
             const heightCmPerDegreePerStep = 1.6 * stepYards;
-
             const cosForward = slopeX * Math.cos(padAngle) + slopeY * Math.sin(padAngle);
             
-            // 正しい幾何学高度の減算累積
             const stepHeightCm = -cosForward * cell.slope * heightCmPerDegreePerStep;
             totalHeightCm += stepHeightCm; 
 
@@ -210,7 +207,6 @@
             curY += padY * stepPx;
         }
 
-        // 高低差の出力（マイナス＝下り）
         const heightType = totalHeightCm < 0 ? "下り" : "上り";
         document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(totalHeightCm).toFixed(1)} cm の 【${heightType}】`;
 
