@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - V21 PRO CAPABLE</title>
+    <title>GOLF PUTT NAVI - V22 PERFECT CAPABLE</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
         .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
@@ -69,16 +69,29 @@
 
     const greenSlopeMap = {};
 
+    // データベースのキー形式が「x,y（0〜40）」でも「x*10,y*10（0〜400）」でも確実に読み込める頑丈なマップ生成処理
     function buildMapForHole(num) {
         const data = HOLE_DATABASES[num] || {};
+        
+        // 元データを正規化して一時格納
+        const normalizedData = {};
+        for (const [k, d] of Object.entries(data)) {
+            const [kx, ky] = k.split(',').map(Number);
+            // キーが40を超える（ピクセルベース）なら10で割って0〜40スケールに統一
+            const nx = kx > 40 ? Math.floor(kx / 10) : kx;
+            const ny = ky > 40 ? Math.floor(ky / 10) : ky;
+            normalizedData[`${nx},${ny}`] = d;
+        }
+
         for(let x=0; x<=40; x++) {
             for(let y=0; y<=40; y++) {
                 const key = `${x},${y}`;
-                if(data[key]) {
-                    greenSlopeMap[key] = data[key];
+                if(normalizedData[key]) {
+                    greenSlopeMap[key] = normalizedData[key];
                 } else {
+                    // 周辺データからの滑らかな補完（IDW）
                     let totalWeight = 0, ws = 0, wx = 0, wy = 0;
-                    for (const [k, d] of Object.entries(data)) {
+                    for (const [k, d] of Object.entries(normalizedData)) {
                         const [kx, ky] = k.split(',').map(Number);
                         const dist = Math.hypot(x-kx, y-ky) || 0.1;
                         const w = 1 / Math.pow(dist, 2);
@@ -149,6 +162,7 @@
         el.setAttribute('cx', x); el.setAttribute('cy', y); el.style.display = 'block';
     }
 
+    // 地形幾何学累積エンジン (V22 参照スケール完全同期版)
     function runSim() {
         const dx = pinPos.x - ballPos.x;
         const dy = pinPos.y - ballPos.y;
