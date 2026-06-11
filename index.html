@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - V12.1 STABLE</title>
+    <title>GOLF PUTT NAVI - V13 PURE PHYSICS</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
         .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
@@ -117,7 +117,7 @@
         buildMapForHole(num);
         document.getElementById('page-home').classList.remove('active');
         document.getElementById('page-game').classList.add('active');
-        document.getElementById('statusBar').innerText = "【タップしてボールとピンを配置】";
+        document.getElementById('statusBar').innerText = "【タップして配置】";
         resetApp();
     };
 
@@ -149,11 +149,13 @@
         el.setAttribute('cx', x); el.setAttribute('cy', y); el.style.display = 'block';
     }
 
+    // 純粋物理演算エンジン (V13 - 補正係数完全撤廃版)
     function runSim() {
         const dx = pinPos.x - ballPos.x;
         const dy = pinPos.y - ballPos.y;
         const distPx = Math.hypot(dx, dy);
         
+        // 1ピクセル = 0.1ヤード固定ステップ
         const stepPx = 1.0; 
         const pxToMeter = 0.1 * 0.9144;
         const distanceYards = distPx * 0.1;
@@ -191,42 +193,38 @@
             const slopeX = Math.sin(slopeRad);
             const slopeY = -Math.cos(slopeRad);
 
-            // 【スケール修正】度数（11.5等）を直接sinにするのではなく、ゴルフグリーンの現実的な傾斜（%勾配）へマッピング
-            // 一般的にヤーテージブックの「1.5」や「2.0」は、％（パーセント）勾配ベースであるため、度数計算の重みを現実のパットの転がりに合わせて0.25倍に補正します
-            const grade = Math.sin(cell.slope * Math.PI / 180) * 0.25;
+            // 【純粋物理への回帰】ヤーテージブックの数値を「度数（Degree）」としてそのまま認識
+            // 物理学の定義通り、斜面上の重力加速度成分（sin θ）を純粋に算出
+            const grade = Math.sin(cell.slope * Math.PI / 180);
 
-            // 高低差の蓄積
+            // 前方への傾斜（高低差の蓄積）
             const slopeForward = (slopeX * padX + slopeY * padY) * grade;
             totalHeightDeviationMeters += slopeForward * (stepPx * pxToMeter);
 
-            // 曲がり幅の蓄積
+            // 横方向への傾斜（曲がり幅の蓄積）
             const slopeSide = (slopeX * (-padY) - slopeY * padX) * grade;
             
-            // 物理演算の過剰評価を防ぐため、過剰なフィッティング係数を排除し、純粋な重力偏差のみを蓄積
+            // 人為的な掛け算をすべて排除し、純粋な重力ベクトルによる軌道ズレを蓄積
             totalSideDeviationMeters += slopeSide * (stepPx * pxToMeter);
 
             curX += padX * stepPx;
             curY += padY * stepPx;
         }
 
-        // 高低差の出力（現実的なcmスケールに落ち着きます）
+        // 高低差の出力（物理スケールと一致した精密なcmが出ます）
         const heightCm = totalHeightDeviationMeters * 100;
         const heightType = heightCm > 0 ? "下り" : "上り";
         document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(heightCm).toFixed(1)} cm の 【${heightType}】`;
 
         // カップ数換算 (1カップ = 10.8cm = 0.108m)
         const finalCups = totalSideDeviationMeters / 0.108;
-        const directionCorrected = finalCups > 0 ? "左" : "right";
+        const directionCorrected = finalCups > 0 ? "左" : "右";
 
-        // 【最終表示指示の反転バグ修正】
-        // finalCupsがプラス（左からのスライス傾斜）の時は、カップの「左」を狙うのが正解。
-        // ここで表示指示の文字が直感と一致するよう、変数名とテキストをマッピング
         const uiResult = document.getElementById('uiResult');
         if (Math.abs(finalCups) < 0.2) {
             uiResult.innerText = "ほぼストレートに狙う";
         } else {
-            const sideText = directionCorrected === "左" ? "左" : "右";
-            uiResult.innerText = `カップの 【${sideText}】 に ${Math.abs(finalCups).toFixed(1)} カップ外す`;
+            uiResult.innerText = `カップの 【${directionCorrected}】 に ${Math.abs(finalCups).toFixed(1)} カップ外す`;
         }
 
         const line = document.getElementById('traceLine');
