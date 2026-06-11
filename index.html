@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - V16 PRO REAL PHYSICS</title>
+    <title>GOLF PUTT NAVI - V17 REAL SCALE</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
         .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
@@ -149,14 +149,15 @@
         el.setAttribute('cx', x); el.setAttribute('cy', y); el.style.display = 'block';
     }
 
-    // 完全幾何幾何物理演算エンジン (V16 ラジアンバグ完全消滅版)
+    // 地形幾何学累積エンジン (V17 - スケール完全一致版)
     function runSim() {
         const dx = pinPos.x - ballPos.x;
         const dy = pinPos.y - ballPos.y;
         const distPx = Math.hypot(dx, dy);
         
-        // 1ピクセル＝0.1ヤード＝9.144cm
+        // 【重要】1ピクセル＝0.1ヤード。これを計算の基本移動スケールにする
         const stepPx = 1.0; 
+        const stepYards = 0.1; // 1ステップ＝0.1ヤード
         const distanceYards = distPx * 0.1;
         const distanceMeters = distanceYards * 0.9144;
         document.getElementById('distanceOut').innerText = `📏 距離: ${distanceYards.toFixed(1)} ヤード (約 ${distanceMeters.toFixed(1)} m)`;
@@ -166,7 +167,7 @@
         const padAngle = Math.atan2(dy, dx);
 
         let totalHeightCm = 0;
-        let totalSideDeviationPx = 0;
+        let totalSideDeviationCm = 0;
         
         let curX = ballPos.x;
         let curY = ballPos.y;
@@ -188,41 +189,47 @@
                 highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gx*10}" y="${gy*10}" width="10" height="10" />`;
             }
 
-            // ヤーテージブックの矢印の直交ベクトル
             const slopeRad = cell.angle * Math.PI / 180;
             const slopeX = Math.sin(slopeRad);
             const slopeY = -Math.cos(slopeRad);
 
-            // 【ラジアンバグの完全排除】
-            // 幾何学的に「1ヤード進むごとの高さの変化量(cm)」を三角関数（正確にラジアン変換）で算出
-            // 1歩（0.1ヤード＝9.144cm）あたりに進む純粋な垂直高低差（cm）
-            const stepMeters = 0.1 * 0.9144;
-            const gradePercent = Math.tan(cell.slope * Math.PI / 180); // 度数からパーセント勾配に正しく直撃変換
+            // 1ヤード（91.44cm）進むごとに、傾斜1度あたり「約1.6cm」の垂直高低差が発生する（幾何学定義）
+            // 0.1ヤード（1ステップ）あたりに進む、斜度1度ベースの垂直変化量（cm）
+            const heightCmPerDegreePerStep = 1.6 * stepYards;
 
-            // 進行方向への傾斜成分（同じ向きなら下り＝高度減少）
+            // 進行方向への傾斜成分（同じ向きなら下り坂＝高度は減少）
             const cosForward = slopeX * Math.cos(padAngle) + slopeY * Math.sin(padAngle);
-            const stepHeightCm = cosForward * gradePercent * stepMeters * 100;
-            totalHeightCm += stepHeightCm; // 下りならマイナス、上りならプラスとして蓄積
+            
+            // その1歩で変わるリアルな高低差（cm）＝ 進行方向成分 × 斜度（度数） × 1度あたりの変化量
+            // 例：11.5度の斜面で正面を向いていれば、1歩（0.1ヤード）で 1 * 11.5 * 0.16 = 約1.84cm 下がる
+            const stepHeightCm = cosForward * cell.slope * heightCmPerDegreePerStep;
+            totalHeightCm += stepHeightCm; 
 
             // 横方向からの傾斜成分（スライスならプラス、フックならマイナス）
             const sinSide = slopeX * (-Math.sin(padAngle)) - slopeY * Math.cos(padAngle);
             
-            // 下り坂（cosForward > 0）では、ボールが加速してピンをオーバーしやすくなるため、
-            // 横傾斜の影響を受ける時間が長くなる補正（重力落下の物理）を組み込み
-            const speedFactor = cosForward > 0 ? (1.0 + cosForward * gradePercent * 5.0) : (1.0 - Math.abs(cosForward * gradePercent));
-            totalSideDeviationPx += sinSide * gradePercent * stepPx * 12.0 * speedFactor;
+            // 【下り坂での大曲がり物理の完全再現】
+            // 下り坂（cosForward > 0）を滑り落ちるパットでは、ボールのスピードが死なずにダラダラと転がり続けるため、
+            // 横傾斜の影響を2重、3重に受けて曲がり幅が爆発的に大きくなります。
+            // 逆に上り坂（cosForward < 0）では、すぐにボールの勢いが死ぬため曲がり幅は小さくなります。
+            const slopeWeight = cosForward > 0 ? (1.0 + cosForward * (cell.slope / 4.0)) : (1.0 / (1.0 + Math.abs(cosForward) * (cell.slope / 6.0)));
+
+            // 1ヤード進むごとに、斜度1度あたり横に何cm流されるかの物理実測ベース
+            // 0.1ヤード（1ステップ）あたりの横ブレ蓄積量（cm）
+            const sideCmPerDegreePerStep = 1.1 * stepYards * slopeWeight;
+            totalSideDeviationCm += sinSide * cell.slope * sideCmPerDegreePerStep;
 
             curX += padX * stepPx;
             curY += padY * stepPx;
         }
 
-        // 高低差の出力正常化（マイナス＝ボールの進行方向に落ちている＝【下り】）
+        // 高低差の出力（マイナス＝ボールの進行方向に落ちている＝【下り】）
         const heightType = totalHeightCm < 0 ? "下り" : "上り";
         document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(totalHeightCm).toFixed(1)} cm の 【${heightType}】`;
 
-        // カップ数換算 (1カップ = 10.8cm = 1.18ピクセル換算)
-        // 右に流されるスライス（totalSideDeviationPxがプラス）の時は、カップの【左】を狙う
-        const finalCups = (totalSideDeviationPx * 9.144) / 10.8;
+        // カップ数換算 (1カップ = 10.8cm)
+        // 右に流されるスライス（totalSideDeviationCmがプラス）の時は、カップの【左】を狙う
+        const finalCups = totalSideDeviationCm / 10.8;
         const directionCorrected = finalCups > 0 ? "左" : "右";
 
         const uiResult = document.getElementById('uiResult');
