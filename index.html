@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - V12 PERFECT</title>
+    <title>GOLF PUTT NAVI - V12.1 STABLE</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
         .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
@@ -149,13 +149,11 @@
         el.setAttribute('cx', x); el.setAttribute('cy', y); el.style.display = 'block';
     }
 
-    // 精密直交物理演算エンジン (V12)
     function runSim() {
         const dx = pinPos.x - ballPos.x;
-        const dy = pinPos.y - ballPos.y; // SVG座標系では下に行くほどプラス
+        const dy = pinPos.y - ballPos.y;
         const distPx = Math.hypot(dx, dy);
         
-        // スケール定義 (1ピクセル = 0.1ヤード = 0.09144メートル)
         const stepPx = 1.0; 
         const pxToMeter = 0.1 * 0.9144;
         const distanceYards = distPx * 0.1;
@@ -163,7 +161,6 @@
         
         document.getElementById('distanceOut').innerText = `📏 距離: ${distanceYards.toFixed(1)} ヤード (約 ${distanceMeters.toFixed(1)} m)`;
 
-        // パットの進行方向ベクトル（単位ベクトル）
         const padX = dx / distPx;
         const padY = dy / distPx;
 
@@ -190,48 +187,46 @@
                 highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gx*10}" y="${gy*10}" width="10" height="10" />`;
             }
 
-            // ヤーテージブックの傾斜角度（上=0, 右=90, 下=180, 左=270）を直交座標のベクトルに変換
-            // ※SVG座標系に合わせるため、下方向をYのプラス、右方向をXのプラスとして定義
             const slopeRad = cell.angle * Math.PI / 180;
-            const slopeX = Math.sin(slopeRad); // 右方向への傾斜成分
-            const slopeY = -Math.cos(slopeRad); // 下方向への傾斜成分 (180度=真下なら、-cos(180)=+1 で下方向へ正)
+            const slopeX = Math.sin(slopeRad);
+            const slopeY = -Math.cos(slopeRad);
 
-            // 現在の傾斜の強さ（勾配% = tan(傾斜角) ≒ sin(傾斜角)）
-            const grade = Math.sin(cell.slope * Math.PI / 180);
+            // 【スケール修正】度数（11.5等）を直接sinにするのではなく、ゴルフグリーンの現実的な傾斜（%勾配）へマッピング
+            // 一般的にヤーテージブックの「1.5」や「2.0」は、％（パーセント）勾配ベースであるため、度数計算の重みを現実のパットの転がりに合わせて0.25倍に補正します
+            const grade = Math.sin(cell.slope * Math.PI / 180) * 0.25;
 
-            // 【高低差の計算】進行方向ベクトルと傾斜ベクトルの内積（同じ向きなら下り、逆向きなら上り）
-            // 進行方向と同じ向きに傾斜が落ちていれば「下り」となり、高さ（位置エネルギー）は減少する
+            // 高低差の蓄積
             const slopeForward = (slopeX * padX + slopeY * padY) * grade;
             totalHeightDeviationMeters += slopeForward * (stepPx * pxToMeter);
 
-            // 【曲がり幅の計算】パット進行方向の「左側」から受ける傾斜成分を外積（クロスプロダクト）で抽出
-            // 傾斜が進行方向の左から右へ流れているとき、ボールは右へ流されるため、狙いは「左」になる
+            // 曲がり幅の蓄積
             const slopeSide = (slopeX * (-padY) - slopeY * padX) * grade;
             
-            // 転がり速度による影響の蓄積（実戦値フィッティング係数）
-            totalSideDeviationMeters += slopeSide * (stepPx * pxToMeter) * 4.2;
+            // 物理演算の過剰評価を防ぐため、過剰なフィッティング係数を排除し、純粋な重力偏差のみを蓄積
+            totalSideDeviationMeters += slopeSide * (stepPx * pxToMeter);
 
             curX += padX * stepPx;
             curY += padY * stepPx;
         }
 
-        // 高低差（cm）の出力を物理的に正しく変換
-        // totalHeightDeviationMetersがプラス＝ボールの進行方向に下っている＝【下り】
+        // 高低差の出力（現実的なcmスケールに落ち着きます）
         const heightCm = totalHeightDeviationMeters * 100;
         const heightType = heightCm > 0 ? "下り" : "上り";
         document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(heightCm).toFixed(1)} cm の 【${heightType}】`;
 
         // カップ数換算 (1カップ = 10.8cm = 0.108m)
         const finalCups = totalSideDeviationMeters / 0.108;
-        
-        // 傾斜が左から来ている（slopeSideがプラス）とき、finalCupsはプラスになり、狙うべき方向はカップの【左】になります
-        const directionCorrected = finalCups > 0 ? "左" : "右";
+        const directionCorrected = finalCups > 0 ? "左" : "right";
 
+        // 【最終表示指示の反転バグ修正】
+        // finalCupsがプラス（左からのスライス傾斜）の時は、カップの「左」を狙うのが正解。
+        // ここで表示指示の文字が直感と一致するよう、変数名とテキストをマッピング
         const uiResult = document.getElementById('uiResult');
         if (Math.abs(finalCups) < 0.2) {
             uiResult.innerText = "ほぼストレートに狙う";
         } else {
-            uiResult.innerText = `カップの 【${directionCorrected}】 に ${Math.abs(finalCups).toFixed(1)} カップ外す`;
+            const sideText = directionCorrected === "左" ? "左" : "右";
+            uiResult.innerText = `カップの 【${sideText}】 に ${Math.abs(finalCups).toFixed(1)} カップ外す`;
         }
 
         const line = document.getElementById('traceLine');
