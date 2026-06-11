@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - V17 REAL SCALE</title>
+    <title>GOLF PUTT NAVI - V18 PERFECT SCALE</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
         .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
@@ -149,15 +149,14 @@
         el.setAttribute('cx', x); el.setAttribute('cy', y); el.style.display = 'block';
     }
 
-    // 地形幾何学累積エンジン (V17 - スケール完全一致版)
+    // 地形幾何学累積エンジン (V18 高低差符号完全修正版)
     function runSim() {
         const dx = pinPos.x - ballPos.x;
         const dy = pinPos.y - ballPos.y;
         const distPx = Math.hypot(dx, dy);
         
-        // 【重要】1ピクセル＝0.1ヤード。これを計算の基本移動スケールにする
         const stepPx = 1.0; 
-        const stepYards = 0.1; // 1ステップ＝0.1ヤード
+        const stepYards = 0.1; 
         const distanceYards = distPx * 0.1;
         const distanceMeters = distanceYards * 0.9144;
         document.getElementById('distanceOut').innerText = `📏 距離: ${distanceYards.toFixed(1)} ヤード (約 ${distanceMeters.toFixed(1)} m)`;
@@ -186,36 +185,28 @@
             
             if (!checkedCells.has(cellKey)) {
                 checkedCells.add(cellKey);
-                highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gx*10}" y="${gy*10}" width="10" height="10" />`;
+                highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gx*10}" y="${gridY=gy*10}" width="10" height="10" />`;
             }
 
             const slopeRad = cell.angle * Math.PI / 180;
             const slopeX = Math.sin(slopeRad);
             const slopeY = -Math.cos(slopeRad);
 
-            // 1ヤード（91.44cm）進むごとに、傾斜1度あたり「約1.6cm」の垂直高低差が発生する（幾何学定義）
-            // 0.1ヤード（1ステップ）あたりに進む、斜度1度ベースの垂直変化量（cm）
+            // 1ヤードあたり傾斜1度で約1.6cm変化する
             const heightCmPerDegreePerStep = 1.6 * stepYards;
 
-            // 進行方向への傾斜成分（同じ向きなら下り坂＝高度は減少）
+            // 進行方向への傾斜成分（同じ向きなら下り坂＝cosForwardがプラス）
             const cosForward = slopeX * Math.cos(padAngle) + slopeY * Math.sin(padAngle);
             
-            // その1歩で変わるリアルな高低差（cm）＝ 進行方向成分 × 斜度（度数） × 1度あたりの変化量
-            // 例：11.5度の斜面で正面を向いていれば、1歩（0.1ヤード）で 1 * 11.5 * 0.16 = 約1.84cm 下がる
-            const stepHeightCm = cosForward * cell.slope * heightCmPerDegreePerStep;
+            // 【バグ修正】下り坂（cosForwardがプラス）の時は、高度は「マイナス（減少）」しなければならない
+            // 数式の頭にマイナスをつけ、現実の物理と一致させます
+            const stepHeightCm = -cosForward * cell.slope * heightCmPerDegreePerStep;
             totalHeightCm += stepHeightCm; 
 
-            // 横方向からの傾斜成分（スライスならプラス、フックならマイナス）
+            // 横方向からの傾斜成分
             const sinSide = slopeX * (-Math.sin(padAngle)) - slopeY * Math.cos(padAngle);
-            
-            // 【下り坂での大曲がり物理の完全再現】
-            // 下り坂（cosForward > 0）を滑り落ちるパットでは、ボールのスピードが死なずにダラダラと転がり続けるため、
-            // 横傾斜の影響を2重、3重に受けて曲がり幅が爆発的に大きくなります。
-            // 逆に上り坂（cosForward < 0）では、すぐにボールの勢いが死ぬため曲がり幅は小さくなります。
             const slopeWeight = cosForward > 0 ? (1.0 + cosForward * (cell.slope / 4.0)) : (1.0 / (1.0 + Math.abs(cosForward) * (cell.slope / 6.0)));
 
-            // 1ヤード進むごとに、斜度1度あたり横に何cm流されるかの物理実測ベース
-            // 0.1ヤード（1ステップ）あたりの横ブレ蓄積量（cm）
             const sideCmPerDegreePerStep = 1.1 * stepYards * slopeWeight;
             totalSideDeviationCm += sinSide * cell.slope * sideCmPerDegreePerStep;
 
@@ -223,12 +214,13 @@
             curY += padY * stepPx;
         }
 
-        // 高低差の出力（マイナス＝ボールの進行方向に落ちている＝【下り】）
+        // 【表示の正常化】
+        // totalHeightCmがマイナス＝高度が下がった＝【下り】
+        // totalHeightCmがプラス＝高度が上がった＝【上り】
         const heightType = totalHeightCm < 0 ? "下り" : "上り";
         document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(totalHeightCm).toFixed(1)} cm の 【${heightType}】`;
 
-        // カップ数換算 (1カップ = 10.8cm)
-        // 右に流されるスライス（totalSideDeviationCmがプラス）の時は、カップの【左】を狙う
+        // カップ数換算
         const finalCups = totalSideDeviationCm / 10.8;
         const directionCorrected = finalCups > 0 ? "左" : "右";
 
