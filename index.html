@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - V13 PURE PHYSICS</title>
+    <title>GOLF PUTT NAVI - V15 TRUE COORD</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
         .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
@@ -149,35 +149,40 @@
         el.setAttribute('cx', x); el.setAttribute('cy', y); el.style.display = 'block';
     }
 
-    // 純粋物理演算エンジン (V13 - 補正係数完全撤廃版)
+    // 真・物理演算エンジン（V15 ベクトル正常化版）
     function runSim() {
         const dx = pinPos.x - ballPos.x;
         const dy = pinPos.y - ballPos.y;
         const distPx = Math.hypot(dx, dy);
         
-        // 1ピクセル = 0.1ヤード固定ステップ
-        const stepPx = 1.0; 
-        const pxToMeter = 0.1 * 0.9144;
         const distanceYards = distPx * 0.1;
         const distanceMeters = distanceYards * 0.9144;
-        
         document.getElementById('distanceOut').innerText = `📏 距離: ${distanceYards.toFixed(1)} ヤード (約 ${distanceMeters.toFixed(1)} m)`;
 
-        const padX = dx / distPx;
-        const padY = dy / distPx;
-
-        let totalSideDeviationMeters = 0;
-        let totalHeightDeviationMeters = 0;
+        const g = 9.8; 
         
+        // 下り坂ではジャストタッチでも勝手に加速するため、初速計算をマイルドに調整
+        const targetDistanceMeters = distanceMeters + 0.2; 
+        let speed = Math.sqrt(2 * 1.0 * g * targetDistanceMeters); 
+
         let curX = ballPos.x;
         let curY = ballPos.y;
-        const totalSteps = Math.floor(distPx / stepPx);
+        
+        const dt = 0.01; 
+        const pxToMeter = 0.1 * 0.9144;
+        const meterToPx = 1 / pxToMeter;
+
+        let totalHeightDeltaMeters = 0;
+        let totalSideDeviationMeters = 0;
 
         const highlightGroup = document.getElementById('highlightGroup');
         highlightGroup.innerHTML = '';
         let checkedCells = new Set();
 
-        for(let i = 0; i < totalSteps; i++) {
+        const padAngle = Math.atan2(dy, dx);
+
+        let traveledDistPx = 0;
+        while (speed > 0.05 && traveledDistPx < distPx) {
             const gx = Math.max(0, Math.min(40, Math.floor(curX / 10)));
             const gy = Math.max(0, Math.min(40, Math.floor(curY / 10)));
             const cellKey = `${gx},${gy}`;
@@ -192,32 +197,45 @@
             const slopeRad = cell.angle * Math.PI / 180;
             const slopeX = Math.sin(slopeRad);
             const slopeY = -Math.cos(slopeRad);
-
-            // 【純粋物理への回帰】ヤーテージブックの数値を「度数（Degree）」としてそのまま認識
-            // 物理学の定義通り、斜面上の重力加速度成分（sin θ）を純粋に算出
             const grade = Math.sin(cell.slope * Math.PI / 180);
 
-            // 前方への傾斜（高低差の蓄積）
-            const slopeForward = (slopeX * padX + slopeY * padY) * grade;
-            totalHeightDeviationMeters += slopeForward * (stepPx * pxToMeter);
-
-            // 横方向への傾斜（曲がり幅の蓄積）
-            const slopeSide = (slopeX * (-padY) - slopeY * padX) * grade;
+            // パット進行方向への傾斜影響（内積）
+            const cosForward = slopeX * Math.cos(padAngle) + slopeY * Math.sin(padAngle);
+            const stepMeters = speed * dt;
             
-            // 人為的な掛け算をすべて排除し、純粋な重力ベクトルによる軌道ズレを蓄積
-            totalSideDeviationMeters += slopeSide * (stepPx * pxToMeter);
+            // 【物理の正常化】
+            // cosForwardがプラス＝進行方向に向かって傾斜が下りている（＝下り坂）
+            // 下り坂を進むとき、高度変化（stepHeight）は「マイナス（減少）」になる
+            const stepHeight = -cosForward * grade * stepMeters;
+            totalHeightDeltaMeters += stepHeight;
 
-            curX += padX * stepPx;
-            curY += padY * stepPx;
+            // 横方向からの重力の影響（外積）
+            const sinSide = slopeX * (-Math.sin(padAngle)) - slopeY * Math.cos(padAngle);
+            const lateralForce = sinSide * g * grade;
+            totalSideDeviationMeters += lateralForce * dt * (1 / Math.max(speed, 0.2)) * stepMeters;
+
+            // 【転がりの加速・減速の正常化】
+            // 摩擦（常に減速）に対して、下り坂（cosForwardがプラス）なら重力加速度が加算されて「加速（または減速が相殺）」する
+            const friction = 1.2 * g; 
+            speed -= (friction - (cosForward * g * grade)) * dt;
+
+            curX += Math.cos(padAngle) * stepMeters * meterToPx;
+            curY += Math.sin(padAngle) * stepMeters * meterToPx;
+            traveledDistPx += stepMeters * meterToPx;
         }
 
-        // 高低差の出力（物理スケールと一致した精密なcmが出ます）
-        const heightCm = totalHeightDeviationMeters * 100;
-        const heightType = heightCm > 0 ? "下り" : "上り";
-        document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(heightCm).toFixed(1)} cm の 【${heightType}】`;
+        // 【高低差表示の正常化】
+        // 高度変化（totalHeightDeltaMeters）がマイナス＝下りきった＝現実世界の【下り】
+        const realHeightCm = totalHeightDeltaMeters * 100;
+        const heightType = realHeightCm < 0 ? "下り" : "上り";
+        document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(realHeightCm).toFixed(1)} cm の 【${heightType}】`;
 
-        // カップ数換算 (1カップ = 10.8cm = 0.108m)
         const finalCups = totalSideDeviationMeters / 0.108;
+        
+        // 【曲がり・狙い方向表示の正常化】
+        // 進行方向の右から押しつぶされる傾斜（スライスライン）のとき、ボールは右へ曲がる。
+        // 右に曲がるスライスラインの時は、カップの【左】を狙う（左に外す）。
+        // 左に曲がるフックラインの時は、カップの【右】を狙う（右に外す）。
         const directionCorrected = finalCups > 0 ? "左" : "右";
 
         const uiResult = document.getElementById('uiResult');
