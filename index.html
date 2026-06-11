@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GOLF PUTT NAVI - V18 PERFECT SCALE</title>
+    <title>GOLF PUTT NAVI - V19 PRO FIXED</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
         .header { width: 100%; padding: 12px 0; text-align: center; background: #1e5631; font-size: 1rem; font-weight: bold; z-index: 10; }
@@ -149,7 +149,7 @@
         el.setAttribute('cx', x); el.setAttribute('cy', y); el.style.display = 'block';
     }
 
-    // 地形幾何学累積エンジン (V18 高低差符号完全修正版)
+    // 地形幾何学累積エンジン (V19 タイポ完全修正版)
     function runSim() {
         const dx = pinPos.x - ballPos.x;
         const dy = pinPos.y - ballPos.y;
@@ -185,21 +185,21 @@
             
             if (!checkedCells.has(cellKey)) {
                 checkedCells.add(cellKey);
-                highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gx*10}" y="${gridY=gy*10}" width="10" height="10" />`;
+                // 【バグ修正】変な変数代入を完全に削除し、クリーンな座標指定に戻しました
+                highlightGroup.innerHTML += `<rect class="highlight-cell" x="${gx*10}" y="${gy*10}" width="10" height="10" />`;
             }
 
             const slopeRad = cell.angle * Math.PI / 180;
             const slopeX = Math.sin(slopeRad);
             const slopeY = -Math.cos(slopeRad);
 
-            // 1ヤードあたり傾斜1度で約1.6cm変化する
+            // 1ヤードあたり傾斜1度で約1.6cm変化する幾何学定義
             const heightCmPerDegreePerStep = 1.6 * stepYards;
 
             // 進行方向への傾斜成分（同じ向きなら下り坂＝cosForwardがプラス）
             const cosForward = slopeX * Math.cos(padAngle) + slopeY * Math.sin(padAngle);
             
-            // 【バグ修正】下り坂（cosForwardがプラス）の時は、高度は「マイナス（減少）」しなければならない
-            // 数式の頭にマイナスをつけ、現実の物理と一致させます
+            // 下り坂（cosForwardがプラス）の時は、高度はマイナス（減少）する
             const stepHeightCm = -cosForward * cell.slope * heightCmPerDegreePerStep;
             totalHeightCm += stepHeightCm; 
 
@@ -214,9 +214,7 @@
             curY += padY * stepPx;
         }
 
-        // 【表示の正常化】
-        // totalHeightCmがマイナス＝高度が下がった＝【下り】
-        // totalHeightCmがプラス＝高度が上がった＝【上り】
+        // 高低差の出力（マイナス＝高度が下がった＝【下り】）
         const heightType = totalHeightCm < 0 ? "下り" : "上り";
         document.getElementById('heightOut').innerText = `📐 高低差: 約 ${Math.abs(totalHeightCm).toFixed(1)} cm の 【${heightType}】`;
 
